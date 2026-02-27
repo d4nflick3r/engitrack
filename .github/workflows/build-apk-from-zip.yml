@@ -35,7 +35,10 @@ jobs:
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-capacitor-native-csv-share-clipboard.patch"
-
+      - name: Apply layout overflow fix patch
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-layout-overflow-fix.patch"
       - name: Repair package.json
         run: |
           python3 - <<'PY'
