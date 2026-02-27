@@ -1,77 +1,74 @@
 name: Build APK from ZIP (Capacitor)
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+steps:
+  - uses: actions/checkout@v4
 
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
+  - name: Install unzip and patch
+    run: sudo apt-get update && sudo apt-get install -y unzip patch
 
-      - name: Unzip project
-        run: |
-          rm -rf project
-          mkdir -p project
-          unzip -q Engineer-Logbook.zip -d project
+  - name: Unzip project
+    run: |
+      rm -rf project
+      mkdir project
+      unzip -q Engineer-Logbook.zip -d project
 
-      - name: Locate project root (where package.json is)
-        id: findroot
-        run: |
-          set -e
-          ROOT=$(find project -name package.json -maxdepth 6 -print -quit | xargs -I{} dirname {})
-          echo "Detected root: $ROOT"
-          if [ -z "$ROOT" ]; then
-            echo "ERROR: package.json not found after unzip"
-            exit 1
-          fi
-          echo "root=$ROOT" >> $GITHUB_OUTPUT
+  - name: Find project root
+    id: findroot
+    run: |
+      ROOT=$(find project -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
+      if [ -z "$ROOT" ]; then
+        echo "package.json not found"
+        exit 1
+      fi
+      echo "root=$ROOT" >> $GITHUB_OUTPUT
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+  - name: Apply CSV patch
+    run: |
+      cd "${{ steps.findroot.outputs.root }}"
+      patch -p1 < "${{ github.workspace }}/engitrack-capacitor-native-csv-share-clipboard.patch"
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "21"
+  - uses: actions/setup-node@v4
+    with:
+      node-version: 20
 
-      - name: Install dependencies
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm install
+  - uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: 21
 
-      - name: Build web app
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm run build
+  - name: Install dependencies
+    working-directory: ${{ steps.findroot.outputs.root }}
+    run: npm install
 
-      - name: Install Capacitor + plugins
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          npm i -D @capacitor/cli @capacitor/core @capacitor/android
-          npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
+  - name: Build web app
+    working-directory: ${{ steps.findroot.outputs.root }}
+    run: npm run build
 
-      - name: Init/add/sync Android (webDir dist/public)
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          npx cap init EngiTrack com.engitrack.timesheet --web-dir dist/public || true
-          npx cap add android || true
-          npx cap sync android
+  - name: Install Capacitor
+    working-directory: ${{ steps.findroot.outputs.root }}
+    run: |
+      npm i -D @capacitor/cli @capacitor/core @capacitor/android
+      npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Build Debug APK
-        working-directory: ${{ steps.findroot.outputs.root }}/android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+  - name: Build Android APK
+    working-directory: ${{ steps.findroot.outputs.root }}
+    run: |
+      npx cap init EngiTrack com.engitrack.timesheet --web-dir dist/public || true
+      npx cap add android || true
+      npx cap sync android
+      cd android
+      chmod +x gradlew
+      ./gradlew assembleDebug
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: app-debug-apk
+      path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
