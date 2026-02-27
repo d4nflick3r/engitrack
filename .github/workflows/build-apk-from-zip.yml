@@ -19,50 +19,53 @@ jobs:
           rm -rf project
           mkdir -p project
           unzip -q Engineer-Logbook.zip -d project
-          # If the zip contains a single top folder, flatten it:
-          shopt -s dotglob
-          inner=$(find project -mindepth 1 -maxdepth 1 -type d | head -n 1)
-          if [ -n "$inner" ] && [ -f "$inner/package.json" ]; then
-            rm -rf src_root
-            mv "$inner" src_root
-            rm -rf project
-            mv src_root project
+
+      - name: Locate project root (where package.json is)
+        id: findroot
+        run: |
+          set -e
+          ROOT=$(find project -name package.json -maxdepth 6 -print -quit | xargs -I{} dirname {})
+          echo "Detected root: $ROOT"
+          if [ -z "$ROOT" ]; then
+            echo "ERROR: package.json not found after unzip"
+            exit 1
           fi
+          echo "root=$ROOT" >> $GITHUB_OUTPUT
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Setup Java (Android)
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
       - name: Install dependencies
-        working-directory: project
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
       - name: Build web app
-        working-directory: project
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
 
-      - name: Install Capacitor + required plugins
-        working-directory: project
+      - name: Install Capacitor + plugins
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npm i -D @capacitor/cli @capacitor/core @capacitor/android
           npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Create/sync Android project
-        working-directory: project
+      - name: Init/add/sync Android (webDir dist/public)
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npx cap init EngiTrack com.engitrack.timesheet --web-dir dist/public || true
           npx cap add android || true
           npx cap sync android
 
       - name: Build Debug APK
-        working-directory: project/android
+        working-directory: ${{ steps.findroot.outputs.root }}/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
@@ -71,4 +74,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: project/android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
