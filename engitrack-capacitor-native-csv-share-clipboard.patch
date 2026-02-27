@@ -1,0 +1,121 @@
+--- a/package.json
++++ b/package.json
+@@ -74,7 +74,11 @@
+     "wouter": "^3.3.5",
+     "ws": "^8.18.0",
+     "zod": "^3.25.76",
+-    "zod-validation-error": "^3.4.0"
++    "zod-validation-error": "^3.4.0",
++    "@capacitor/core": "^6.0.0",
++    "@capacitor/filesystem": "^6.0.0",
++    "@capacitor/share": "^6.0.0",
++    "@capacitor/clipboard": "^6.0.0"
+   },
+   "devDependencies": {
+     "@replit/vite-plugin-cartographer": "^0.4.4",
+@@ -98,9 +102,11 @@
+     "tailwindcss": "^4.1.14",
+     "tsx": "^4.20.5",
+     "typescript": "5.6.3",
+-    "vite": "^7.1.9"
++    "vite": "^7.1.9",
++    "@capacitor/cli": "^6.0.0",
++    "@capacitor/android": "^6.0.0"
+   },
+   "optionalDependencies": {
+     "bufferutil": "^4.0.8"
+   }
+-}
++}--- a/client/src/pages/Home.tsx
++++ b/client/src/pages/Home.tsx
+@@ -9,6 +9,10 @@
+ import { Settings2, RotateCcw, Download, Calendar as CalendarIcon, Briefcase, Wrench, HardHat, Mail, Copy, CheckCircle2 } from "lucide-react";
+ import { format, parseISO } from "date-fns";
+ import { useState } from "react";
++import { Capacitor } from "@capacitor/core";
++import { Clipboard } from "@capacitor/clipboard";
++import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
++import { Share } from "@capacitor/share";
+ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+ 
+ export default function Home() {
+@@ -23,13 +27,22 @@
+ 
+   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+ 
+-  const handleCopyCsv = () => {
+-    navigator.clipboard.writeText(generatedCsvContent);
+-    setCopied(true);
+-    setTimeout(() => setCopied(false), 2000);
++  const handleCopyCsv = async () => {
++    try {
++      if (Capacitor.isNativePlatform()) {
++        await Clipboard.write({ string: generatedCsvContent });
++      } else {
++        await navigator.clipboard.writeText(generatedCsvContent);
++      }
++      setCopied(true);
++      setTimeout(() => setCopied(false), 2000);
++    } catch (e) {
++      // Fallback: do nothing. Copy can be blocked by browser/device policies.
++      setCopied(false);
++    }
+   };
+ 
+-  const handleSubmit = () => {
++  const handleSubmit = async () => {
+     if (!isValidEmail(state.submitEmail || '')) return;
+ 
+     const summary = calculateSummary(state);
+@@ -61,14 +74,43 @@
+     
+     setGeneratedCsvContent(csv);
+ 
+-    const blob = new Blob([csv], { type: 'text/csv' });
+-    const url = URL.createObjectURL(blob);
+-    const a = document.createElement('a');
+-    a.href = url;
+-    a.download = `timesheet-${state.weekStartDate}.csv`;
+-    a.click();
+-
+-    setIsSubmitModalOpen(true);
++    const filename = `timesheet-${state.weekStartDate}.csv`;
++
++    try {
++      if (Capacitor.isNativePlatform()) {
++        // Write the file to device storage and open the native share sheet (email/WhatsApp/Drive etc.)
++        await Filesystem.writeFile({
++          path: filename,
++          data: csv,
++          directory: Directory.Documents,
++          encoding: Encoding.UTF8,
++          recursive: true,
++        });
++
++        const uri = await Filesystem.getUri({
++          directory: Directory.Documents,
++          path: filename,
++        });
++
++        await Share.share({
++          title: "EngiTrack Timesheet",
++          text: "Weekly timesheet CSV export",
++          url: uri.uri,
++          dialogTitle: "Share timesheet",
++        });
++      } else {
++        // Browser fallback: download the CSV
++        const blob = new Blob([csv], { type: "text/csv" });
++        const url = URL.createObjectURL(blob);
++        const a = document.createElement("a");
++        a.href = url;
++        a.download = filename;
++        a.click();
++        URL.revokeObjectURL(url);
++      }
++    } finally {
++      setIsSubmitModalOpen(true);
++    }
+   };
+ 
+   return (
