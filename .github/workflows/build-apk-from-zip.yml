@@ -52,10 +52,10 @@ jobs:
           npm i -D @capacitor/cli @capacitor/core @capacitor/android
           npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Apply ALL fixes patch (UI + CSV + remove settings)
+            - name: Apply ALL fixes patch (UI + CSV + remove settings)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-fix-all-ui-csv.patch"
+          patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
