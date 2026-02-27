@@ -35,6 +35,19 @@ jobs:
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-capacitor-native-csv-share-clipboard.patch"
+                - name: Repair package.json (remove patch header junk)
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("${{ steps.findroot.outputs.root }}") / "package.json"
+          s = p.read_text(encoding="utf-8", errors="ignore")
+          last = s.rfind("}")
+          if last == -1:
+            raise SystemExit("package.json has no closing brace")
+          fixed = s[:last+1].strip() + "\n"
+          p.write_text(fixed, encoding="utf-8")
+          print("package.json repaired")
+          PY
 
       - name: Setup Node
         uses: actions/setup-node@v4
