@@ -11,7 +11,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install unzip and patch
+      - name: Install unzip + patch
         run: sudo apt-get update && sudo apt-get install -y unzip patch
 
       - name: Unzip project
@@ -31,27 +31,6 @@ jobs:
           fi
           echo "root=$ROOT" >> $GITHUB_OUTPUT
 
-      - name: Apply CSV patch
-        run: |
-          cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-capacitor-native-csv-share-clipboard.patch"
-      - name: Apply layout overflow fix patch
-        run: |
-          cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-layout-overflow-fix.patch"
-      - name: Repair package.json
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("${{ steps.findroot.outputs.root }}") / "package.json"
-          s = p.read_text(encoding="utf-8", errors="ignore")
-          last = s.rfind("}")
-          if last == -1:
-              raise SystemExit("package.json has no closing brace")
-          p.write_text((s[:last+1].strip() + "\n"), encoding="utf-8")
-          print("package.json repaired")
-          PY
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -67,15 +46,20 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
-      - name: Build web app
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm run build
-
-      - name: Install Capacitor + plugins
+      - name: Install Capacitor dependencies
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npm i -D @capacitor/cli @capacitor/core @capacitor/android
           npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
+
+      - name: Apply ALL fixes patch (UI + CSV + remove settings)
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-fix-all-ui-csv.patch"
+
+      - name: Build web app
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: npm run build
 
       - name: Build Android APK
         working-directory: ${{ steps.findroot.outputs.root }}
