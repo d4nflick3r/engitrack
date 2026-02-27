@@ -1,0 +1,74 @@
+name: Build APK from ZIP (Capacitor)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Unzip project
+        run: |
+          rm -rf project
+          mkdir -p project
+          unzip -q Engineer-Logbook.zip -d project
+          # If the zip contains a single top folder, flatten it:
+          shopt -s dotglob
+          inner=$(find project -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          if [ -n "$inner" ] && [ -f "$inner/package.json" ]; then
+            rm -rf src_root
+            mv "$inner" src_root
+            rm -rf project
+            mv src_root project
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Java (Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install dependencies
+        working-directory: project
+        run: npm install
+
+      - name: Build web app
+        working-directory: project
+        run: npm run build
+
+      - name: Install Capacitor + required plugins
+        working-directory: project
+        run: |
+          npm i -D @capacitor/cli @capacitor/core @capacitor/android
+          npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
+
+      - name: Create/sync Android project
+        working-directory: project
+        run: |
+          npx cap init EngiTrack com.engitrack.timesheet --web-dir dist/public || true
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Build Debug APK
+        working-directory: project/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: project/android/app/build/outputs/apk/debug/app-debug.apk
