@@ -56,7 +56,12 @@ jobs:
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
-
+      
+      - name: Remove dedicated email input box
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-remove-email-box.patch"
+     
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
