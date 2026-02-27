@@ -1,0 +1,179 @@
+--- a/client/src/pages/Home.tsx
++++ b/client/src/pages/Home.tsx
+@@ -6,9 +6,13 @@
+ import { Label } from "@/components/ui/label";
+ import { Textarea } from "@/components/ui/textarea";
+ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+-import { Settings2, RotateCcw, Download, Calendar as CalendarIcon, Briefcase, Wrench, HardHat, Mail, Copy, CheckCircle2 } from "lucide-react";
++import { RotateCcw, Download, Calendar as CalendarIcon, Briefcase, Wrench, HardHat, Mail, Copy, CheckCircle2 } from "lucide-react";
+ import { format, parseISO } from "date-fns";
+ import { useState } from "react";
++import { Capacitor } from "@capacitor/core";
++import { Clipboard } from "@capacitor/clipboard";
++import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
++import { Share } from "@capacitor/share";
+ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+ 
+ export default function Home() {
+@@ -23,14 +27,21 @@
+ 
+   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+ 
+-  const handleCopyCsv = () => {
+-    navigator.clipboard.writeText(generatedCsvContent);
+-    setCopied(true);
+-    setTimeout(() => setCopied(false), 2000);
++  const handleCopyCsv = async () => {
++    try {
++      if (Capacitor.isNativePlatform()) {
++        await Clipboard.write({ string: generatedCsvContent });
++      } else {
++        await navigator.clipboard.writeText(generatedCsvContent);
++      }
++      setCopied(true);
++      setTimeout(() => setCopied(false), 2000);
++    } catch {
++      setCopied(false);
++    }
+   };
+ 
+-  const handleSubmit = () => {
+-    if (!isValidEmail(state.submitEmail || '')) return;
++  const handleSubmit = async () => {
+ 
+     const summary = calculateSummary(state);
+     
+@@ -61,14 +72,41 @@
+     
+     setGeneratedCsvContent(csv);
+ 
+-    const blob = new Blob([csv], { type: 'text/csv' });
+-    const url = URL.createObjectURL(blob);
+-    const a = document.createElement('a');
+-    a.href = url;
+-    a.download = `timesheet-${state.weekStartDate}.csv`;
+-    a.click();
+-
+-    setIsSubmitModalOpen(true);
++    const filename = `timesheet-${state.weekStartDate}.csv`;
++
++    try {
++      if (Capacitor.isNativePlatform()) {
++        await Filesystem.writeFile({
++          path: filename,
++          data: csv,
++          directory: Directory.Documents,
++          encoding: Encoding.UTF8,
++          recursive: true,
++        });
++
++        const uri = await Filesystem.getUri({
++          directory: Directory.Documents,
++          path: filename,
++        });
++
++        await Share.share({
++          title: "EngiTrack Timesheet",
++          text: "Weekly timesheet CSV export",
++          url: uri.uri,
++          dialogTitle: "Share timesheet",
++        });
++      } else {
++        const blob = new Blob([csv], { type: "text/csv" });
++        const url = URL.createObjectURL(blob);
++        const a = document.createElement("a");
++        a.href = url;
++        a.download = filename;
++        a.click();
++        URL.revokeObjectURL(url);
++      }
++    } finally {
++      setIsSubmitModalOpen(true);
++    }
+   };
+ 
+   return (
+@@ -97,10 +135,9 @@
+             <Card className="shadow-sm border-slate-200">
+               <CardHeader className="pb-4 border-b bg-slate-50/50">
+                 <CardTitle className="text-lg flex items-center gap-2 font-bold text-slate-800">
+-                  <Settings2 className="h-5 w-5 text-slate-500" />
+-                  Timesheet Settings
++                  Week details
+                 </CardTitle>
+-                <CardDescription>Configure your base rate and weekly setup</CardDescription>
++                <CardDescription>Set the week start date and (optional) submission email</CardDescription>
+               </CardHeader>
+               <CardContent className="pt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div className="space-y-2">
+@@ -212,7 +249,7 @@
+                 size="lg" 
+                 className="w-full text-lg h-14 bg-blue-600 hover:bg-blue-700" 
+                 onClick={handleSubmit}
+-                disabled={!isValidEmail(state.submitEmail || '')}
++                disabled={Boolean(state.submitEmail) && !isValidEmail(state.submitEmail || '')}
+               >
+                 <Download className="h-5 w-5 mr-2" /> Submit Timesheet
+               </Button>
+@@ -245,7 +282,8 @@
+               </h4>
+               <p className="text-sm text-slate-600 mb-4">
+                 Click below to open a draft email to your manager. <strong>You will need to manually attach the downloaded CSV file</strong> before sending.
+-              </p>
++              </p>{state.submitEmail && isValidEmail(state.submitEmail) && (
++
+               <Button 
+                 className="w-full bg-blue-600 hover:bg-blue-700" 
+                 onClick={() => {
+@@ -256,6 +294,7 @@
+               >
+                 <Mail className="h-4 w-4 mr-2" /> Open Email Draft
+               </Button>
++              )}
+             </div>
+             
+             <div className="pt-2 border-t flex flex-col gap-2">
+--- a/client/src/components/timesheet/DayCard.tsx
++++ b/client/src/components/timesheet/DayCard.tsx
+@@ -23,13 +23,13 @@
+     <Card className={`relative overflow-hidden transition-all duration-200 ${day.isDayOff ? 'opacity-60 bg-muted/50' : 'bg-card'}`}>
+       <div className={`absolute top-0 left-0 w-1.5 h-full ${day.isBankHoliday ? 'bg-purple-500' : index > 4 ? 'bg-orange-400' : 'bg-blue-500'}`} />
+       
+-      <CardHeader className="pb-3 pt-4 px-5 flex flex-row items-center justify-between">
++     <CardHeader className="pb-3 pt-4 px-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+         <div>
+           <CardTitle className="text-lg font-bold flex items-center gap-2">
+             {dayName} <span className="text-sm font-normal text-muted-foreground">{shortDate}</span>
+           </CardTitle>
+         </div>
+-        <div className="flex items-center gap-5 text-sm">
++        <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:gap-5 w-full sm:w-auto">
+           <div className="flex items-center gap-2">
+             <Switch 
+               id={`bh-${index}`}
+@@ -38,7 +38,7 @@
+             />
+             <Label htmlFor={`bh-${index}`} className="cursor-pointer text-purple-600 font-medium">Bank Holiday</Label>
+           </div>
+-          <div className="flex items-center gap-2 border-l pl-5">
++          <div className="flex items-center gap-2 sm:border-l sm:pl-5">
+             <Switch 
+               id={`off-${index}`}
+               checked={day.isDayOff} 
+--- a/client/src/index.css
++++ b/client/src/index.css
+@@ -45,3 +45,14 @@
+     @apply font-sans antialiased bg-background text-foreground;
+   }
+ }
++
++/* Mobile WebView overflow fix */
++html, body {
++  width: 100%;
++  max-width: 100%;
++  overflow-x: hidden;
++}
++
++*, *::before, *::after {
++  box-sizing: border-box;
++}
