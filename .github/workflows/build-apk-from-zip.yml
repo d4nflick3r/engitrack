@@ -142,9 +142,27 @@ jobs:
           grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
           grep -n "@capacitor/share" client/src/pages/Home.tsx
 
-      - name: Build web app
+      - name: Build web app (capture log)
         working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+
+                - name: Show first build error
+        if: failure()
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          echo "---- FIRST ERROR (searching build.log) ----"
+          grep -n -m 1 -E "ERROR|Error:|TS[0-9]+|SyntaxError|ReferenceError|Build failed" build.log || true
+          echo "---- CONTEXT (last 60 lines) ----"
+          tail -n 60 build.log || true
+
+                - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ steps.findroot.outputs.root }}/build.log
 
       - name: Build Android APK
         working-directory: ${{ steps.findroot.outputs.root }}
