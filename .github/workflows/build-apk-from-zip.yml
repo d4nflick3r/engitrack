@@ -46,21 +46,26 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
-      - name: Install Capacitor dependencies
+      - name: Install Capacitor deps
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npm i -D @capacitor/cli @capacitor/core @capacitor/android
           npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Apply core fixes patch (CSV + Day Off + remove settings)
+      - name: Apply CSV patch (known-working)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
 
-      - name: Remove dedicated email input box (safe)
+      - name: VERIFY CSV code is present (fail build if not)
         run: |
+          set -e
           cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe-p1.patch"
+          echo "Checking Home.tsx for Capacitor Filesystem CSV export..."
+          grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
+          grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
+          grep -n "@capacitor/share" client/src/pages/Home.tsx
+          echo "OK: Native CSV export code found."
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
