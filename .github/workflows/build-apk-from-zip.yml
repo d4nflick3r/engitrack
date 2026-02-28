@@ -62,10 +62,31 @@ jobs:
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
 
-      - name: Hide unpaid break box (UI only, safe)
+      - name: Hide unpaid break box (UI only, no patch)
         run: |
-          cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-hide-unpaid-break-ui.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path(r"${{ steps.findroot.outputs.root }}")
+          home = root / "client/src/pages/Home.tsx"
+          s = home.read_text(encoding="utf-8")
+
+          # Remove a labeled UI group containing "Unpaid Break"
+          # This is UI-only and does not touch calculations/CSV logic.
+          pattern = r"""\s*<div[^>]*>\s*<label[^>]*>[^<]*Unpaid\s*Break[^<]*</label>.*?</div>\s*"""
+          s2, n = re.subn(pattern, "\n        {/* Unpaid Break hidden */}\n", s, flags=re.S)
+
+          if n == 0:
+            # Fallback: sometimes it is wrapped with a comment before the block
+            pattern2 = r"""\s*\{/\*[^*]*Unpaid\s*Break[^*]*\*/\}\s*<div[^>]*>.*?</div>\s*"""
+            s2, n2 = re.subn(pattern2, "\n        {/* Unpaid Break hidden */}\n", s, flags=re.S)
+            if n2 == 0:
+              raise SystemExit("Could not find Unpaid Break UI block in Home.tsx to hide")
+
+          home.write_text(s2, encoding="utf-8")
+          print("Hidden unpaid break UI in:", home)
+          PY
 
       - name: Copy watermark image into app public folder
         run: |
