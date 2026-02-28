@@ -1,0 +1,105 @@
+--- a/client/src/pages/Home.tsx
++++ b/client/src/pages/Home.tsx
+@@ -8,7 +8,7 @@
+ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+ import { RotateCcw, Download, Calendar as CalendarIcon, Briefcase, Wrench, HardHat, Mail, Copy, CheckCircle2 } from "lucide-react";
+ import { format, parseISO } from "date-fns";
+-import { useState } from "react";
++import { useEffect, useState } from "react";
+ import { Capacitor } from "@capacitor/core";
+ import { Clipboard } from "@capacitor/clipboard";
+ import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
+@@ -24,8 +24,21 @@
+   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
+   const [generatedCsvContent, setGeneratedCsvContent] = useState("");
+   const [copied, setCopied] = useState(false);
++  const [engineerName, setEngineerName] = useState(() => {
++    try { return localStorage.getItem("engitrack_engineer_name") || ""; } catch { return ""; }
++  });
++
++  useEffect(() => {
++    try { localStorage.setItem("engitrack_engineer_name", engineerName); } catch {}
++  }, [engineerName]);
++
+ 
+   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
++
++  const safeFilePart = (name: string) => {
++    const cleaned = (name || "").trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
++    return cleaned || "unknown";
++  };
+ 
+   const handleCopyCsv = async () => {
+     try {
+@@ -47,7 +60,8 @@
+     const summary = calculateSummary(state);
+ 
+     let csv = "EngiTrack Weekly Timesheet Export\n";
+-    csv += `Week Commencing,${state.weekStartDate}\n\n`;
++    csv += `Week Commencing,${state.weekStartDate}\n`;
++    csv += `Engineer,${engineerName || ""}\n\n`;
+ 
+     csv += "Date,Day,Start Time,End Time,Break (mins),Total Hours,Bank Holiday,Day Off\n";
+     state.days.forEach(d => {
+@@ -73,7 +87,7 @@
+ 
+     setGeneratedCsvContent(csv);
+ 
+-    const fileName = `timesheet-${state.weekStartDate}.csv`;
++    const fileName = `timesheet-${safeFilePart(engineerName)}-${state.weekStartDate}.csv`;
+ 
+     try {
+       if (Capacitor.isNativePlatform()) {
+@@ -92,8 +106,8 @@
+         });
+ 
+         await Share.share({
+-          title: "EngiTrack Timesheet",
+-          text: "Timesheet CSV exported from EngiTrack.",
++          title: "SOS EngiTrack Timesheet",
++          text: `Timesheet CSV for ${engineerName || "engineer"} (${state.weekStartDate}).`,
+           url: uri.uri,
+           dialogTitle: "Share timesheet CSV",
+         });
+@@ -145,7 +159,7 @@
+                 <CardTitle className="text-lg flex items-center gap-2 font-bold text-slate-800">
+                   Week Details
+                 </CardTitle>
+-                <CardDescription>Set week commencing date and optional email</CardDescription>
++                <CardDescription>Set week commencing date and engineer name</CardDescription>
+               </CardHeader>
+               <CardContent className="pt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div className="space-y-2">
+@@ -158,16 +172,16 @@
+                   />
+                 </div>
+                 <div className="space-y-2">
+-                  <Label className="font-semibold text-slate-700">Dedicated Email Address</Label>
++                  <Label className="font-semibold text-slate-700">Engineer Name</Label>
+                   <Input 
+-                    type="email" 
+-                    placeholder="manager@example.com"
+-                    value={state.submitEmail || ''}
+-                    onChange={(e) => setSubmitEmail(e.target.value)}
+-                    className="font-mono text-base"
++                    type="text" 
++                    placeholder="e.g. Daniel Flicker"
++                    value={engineerName}
++                    onChange={(e) => setEngineerName(e.target.value)}
++                    className="text-base"
+                   />
+                 </div>
+-              </CardContent>
++</CardContent>
+             </Card>
+ 
+             <div className="space-y-5">
+@@ -272,7 +286,7 @@
+               CSV ready
+             </DialogTitle>
+             <DialogDescription className="pt-2 text-base text-slate-700">
+-              Your timesheet CSV is ready as <strong>timesheet-{state.weekStartDate}.csv</strong>.
++              Your timesheet CSV is ready as <strong>timesheet-{safeFilePart(engineerName)}-{state.weekStartDate}.csv</strong>.
+             </DialogDescription>
+           </DialogHeader>
+           
