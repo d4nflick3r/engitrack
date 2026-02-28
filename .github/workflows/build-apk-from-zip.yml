@@ -62,6 +62,11 @@ jobs:
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
 
+      - name: Hide unpaid break box (UI only, safe)
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-hide-unpaid-break-ui.patch"
+
       - name: Copy watermark image into app public folder
         run: |
           set -e
