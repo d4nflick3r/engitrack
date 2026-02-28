@@ -69,61 +69,35 @@ jobs:
           mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
           cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
 
-      - name: Inject SOS watermark into Home.tsx (no patch)
+      - name: Add watermark CSS (safe)
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          set -e
+          CSS_FILE="${{ steps.findroot.outputs.root }}/client/src/index.css"
+          test -f "$CSS_FILE"
+          # Prevent duplicate insertion
+          if grep -q "sos-watermark.png" "$CSS_FILE"; then
+            echo "Watermark CSS already present; skipping"
+            exit 0
+          fi
+          cat >> "$CSS_FILE" <<'EOF'
 
-          root = Path(r"${{ steps.findroot.outputs.root }}")
-          home = root / "client/src/pages/Home.tsx"
-          s = home.read_text(encoding="utf-8")
-
-          if "sos-watermark.png" in s:
-            print("Watermark already present; skipping")
-            raise SystemExit(0)
-
-          m = re.search(r"return\s*\(\s*(<\w+[^>]*>)", s)
-          if not m:
-            raise SystemExit("Could not find opening JSX tag after return( in Home.tsx")
-
-          open_tag = m.group(1)
-
-          if "style=" in open_tag:
-            open_tag_new = re.sub(r'style=\{\{\s*', 'style={{ position: "relative", ', open_tag, count=1)
-          else:
-            open_tag_new = open_tag[:-1] + ' style={{ position: "relative" }}>'
-          s = s.replace(open_tag, open_tag_new, 1)
-
-          insert = """
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: "100%",
-              backgroundImage: "url('/sos-watermark.png')",
-              backgroundRepeat: "no-repeat",
-              backgroundPosition: "top center",
-              backgroundSize: "300px",
-              opacity: 0.06,
-              pointerEvents: "none",
-              zIndex: 0
-            }}
-          />
-          <div style={{ position: "relative", zIndex: 1 }}>
-          """
-
-          s, n = re.subn(r"(return\s*\(\s*<\w+[^>]*>\s*)", r"\1" + insert, s, count=1)
-          if n == 0:
-            raise SystemExit("Failed to inject watermark layer")
-
-          s = s.replace("\n</div>\n  );", "\n</div>\n</div>\n  );", 1)
-
-          home.write_text(s, encoding="utf-8")
-          print("Injected watermark into Home.tsx")
-          PY
+/* SOS watermark background */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url("/sos-watermark.png");
+  background-repeat: no-repeat;
+  background-position: top center;
+  background-size: 300px;
+  opacity: 0.06;
+  pointer-events: none;
+  z-index: 0;
+}
+EOF
 
       - name: VERIFY CSV code is present
         run: |
