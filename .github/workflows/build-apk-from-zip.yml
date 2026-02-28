@@ -104,9 +104,16 @@ jobs:
       - name: Build Android APK
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
-          npx cap init EngiTrack com.engitrack.timesheet --web-dir dist/public || true
+          npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
           npx cap add android || true
           npx cap sync android
+
+          # Set the launcher/display name (label under the icon)
+          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_FILE" ]; then
+            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
+          fi
+
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
