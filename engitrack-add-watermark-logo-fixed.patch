@@ -1,0 +1,35 @@
+--- a/client/src/pages/Home.tsx
++++ b/client/src/pages/Home.tsx
+@@ -118,7 +118,24 @@
+   };
+ 
+   return (
+-    <div className="min-h-screen bg-slate-50 pb-20 font-sans">
++    <div style={{ position: "relative" }}>
++      <div
++        style={{
++          position: "absolute",
++          top: 0,
++          left: 0,
++          width: "100%",
++          height: "100%",
++          backgroundImage: "url('/sos-watermark.png')",
++          backgroundRepeat: "no-repeat",
++          backgroundPosition: "top center",
++          backgroundSize: "320px",
++          opacity: 0.06,
++          pointerEvents: "none",
++          zIndex: 0
++        }}
++      />
++      <div className="min-h-screen bg-slate-50 pb-20 font-sans" style={{ position: "relative", zIndex: 1 }}>
+       <header className="bg-white border-b border-border sticky top-0 z-20 shadow-sm">
+         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+           <div className="flex items-center gap-3">
+@@ -299,5 +316,6 @@
+         </DialogContent>
+       </Dialog>
+     </div>
++    </div>
+   );
+ }
