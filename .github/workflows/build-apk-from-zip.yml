@@ -83,30 +83,12 @@ jobs:
             raise SystemExit(0)
 
           # Ensure the outermost return wrapper is position: relative.
-          # We only change the first "<div" immediately after "return (".
           s2, n = re.subn(r"(return\s*\(\s*)<div(\s*[^>]*)>",
-                         r"\1<div\2 style={{ position: \"relative\" }}>",
-                         s, count=1)
+                          r"\1<div\2 style={{ position: \"relative\" }}>",
+                          s, count=1)
           if n == 0:
-            # If it already has attributes, inject position: relative without clobbering.
-            s2, n = re.subn(r"(return\s*\(\s*)<div\s+([^>]*?)>",
-                            r"\1<div \2>",
-                            s, count=1)
-            if n == 0:
-              raise SystemExit("Could not find the outer return <div> in Home.tsx")
+            raise SystemExit("Could not find the outer return <div> in Home.tsx")
 
-            # If we couldn't safely inject style, we won't risk breaking the component.
-            # Instead insert a wrapper div just inside return(
-            s2 = re.sub(r"(return\s*\(\s*)",
-                        r"\1<div style={{ position: \"relative\" }}>\n",
-                        s, count=1)
-            # And close it just before the final ');' of the component
-            s2 = re.sub(r"\n\s*\);\s*\n\}",
-                        r"\n</div>\n  );\n}\n",
-                        s2, count=1)
-
-          # Insert watermark layer + content wrapper right after the opening return div.
-          # Add as first child so it sits behind everything.
           insert = """
           <div
             style={{
@@ -127,17 +109,13 @@ jobs:
           <div style={{ position: "relative", zIndex: 1 }}>
           """
 
-          # Add insert after first opening div tag of return wrapper
+          # Insert watermark layer + content wrapper right after the opening return div.
           s3, n = re.subn(r"(return\s*\(\s*<div[^>]*>\s*)", r"\1" + insert, s2, count=1)
           if n == 0:
             raise SystemExit("Could not inject watermark into Home.tsx")
 
-          # Close the wrapper div before the closing div that matches the return wrapper.
-          # We do this by adding one extra closing </div> just before the final return wrapper close.
-          # Add near the end: before the last occurrence of "\n</div>\n  );"
-          s4, n = re.subn(r"(\n</div>\s*\n\s*\);\s*)", r"\n</div>\1", s3, count=1)
-          if n == 0:
-            raise SystemExit("Could not close watermark content wrapper safely")
+          # Close the content wrapper before the return wrapper closes.
+          s4 = s3.replace("\n</div>\n  );", "\n</div>\n</div>\n  );", 1)
 
           home.write_text(s4, encoding="utf-8")
           print("Injected watermark into:", home)
