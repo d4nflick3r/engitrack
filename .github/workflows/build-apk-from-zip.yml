@@ -78,7 +78,7 @@ jobs:
             echo "Watermark CSS already present; skipping"
             exit 0
           fi
-          printf '\n/* SOS watermark background */\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: top center;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
+          printf '\n/* SOS watermark background */\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: 50%% 80px;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
 
       - name: VERIFY CSV code is present
         run: |
