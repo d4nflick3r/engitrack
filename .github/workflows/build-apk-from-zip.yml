@@ -57,10 +57,98 @@ jobs:
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
 
-      - name: Add Engineer Name + include in CSV filename
+      - name: Add Engineer Name input + use in CSV filename (robust, no patch)
         run: |
+          set -e
           cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-add-engineer-name-filename.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          home = Path("client/src/pages/Home.tsx")
+          s = home.read_text(encoding="utf-8")
+
+          # Idempotency marker
+          if "__ENGINEER_NAME_FIELD__" not in s:
+              # Ensure useState exists in react import (usually already there)
+              if re.search(r'from\s+[\'"]react[\'"]', s):
+                  m = re.search(r'import\s+[^;]*\{\s*([^}]*)\s*\}[^;]*from\s+[\'"]react[\'"]', s)
+                  if m and "useState" not in m.group(1):
+                      s = re.sub(
+                          r'(import\s+[^;]*\{\s*)([^}]*)\s*(\}[^;]*from\s+[\'"]react[\'"])',
+                          lambda mm: mm.group(1) + (mm.group(2).strip() + ", useState") + " " + mm.group(3),
+                          s, count=1
+                      )
+
+              state_block = r'''
+  /* __ENGINEER_NAME_FIELD__ */
+  const [engineerName, setEngineerName] = useState(() => {
+    try { return localStorage.getItem("engitrack_engineer_name") || ""; } catch { return ""; }
+  });
+
+  const engineerSlug = (engineerName || "engineer")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+  const onEngineerNameChange = (v: string) => {
+    setEngineerName(v);
+    try { localStorage.setItem("engitrack_engineer_name", v); } catch {}
+  };
+
+  const todayIso = new Date().toISOString().slice(0,10);
+  const fileName = `timesheet-${engineerSlug}-${todayIso}.csv`;
+'''
+              s2, n = re.subn(r'(export\s+default\s+function\s+Home\s*\([^)]*\)\s*\{\s*)', r'\1' + state_block, s, count=1)
+              if n == 0:
+                  s2, n = re.subn(r'(function\s+Home\s*\([^)]*\)\s*\{\s*)', r'\1' + state_block, s, count=1)
+              if n == 0:
+                  raise SystemExit("Could not find Home() component to inject engineerName state")
+              s = s2
+
+          # Inject UI for engineer name
+          if "__ENGINEER_NAME_INPUT__" not in s:
+              ui_block = r'''
+          {/* __ENGINEER_NAME_INPUT__ */}
+          <div className="w-full max-w-3xl mx-auto px-4 mt-2">
+            <label className="block text-sm font-medium mb-1">Engineer Name</label>
+            <input
+              value={engineerName}
+              onChange={(e) => onEngineerNameChange(e.target.value)}
+              placeholder="Type your name"
+              className="w-full rounded-md border px-3 py-2 text-base"
+            />
+          </div>
+'''
+              s3, n = re.subn(r'(<h1[^>]*>.*?</h1>)', r'\1' + ui_block, s, count=1, flags=re.S)
+              if n == 0:
+                  s3, n = re.subn(r'(return\s*\(\s*<div[^>]*>\s*)', r'\1' + ui_block, s, count=1, flags=re.S)
+              if n == 0:
+                  raise SystemExit("Could not place Engineer Name input UI")
+              s = s3
+
+          # Make writeFile use fileName for path if it currently uses a literal *.csv path
+          if "Filesystem.writeFile" in s:
+              s_new, n = re.subn(
+                  r'(Filesystem\.writeFile\s*\(\s*\{\s*[^}]*\bpath\s*:\s*)([\'"][^\'"]+\.csv[\'"])(\s*,)',
+                  r'\1fileName\3',
+                  s, count=1, flags=re.S
+              )
+              if n > 0:
+                  s = s_new
+
+          # Try to prepend Engineer line to the CSV string variable if present
+          if "Engineer," not in s:
+              s = re.sub(
+                  r'(const\s+csv(Content|Data)?\s*=\s*)([`\'"])',
+                  r'\1\2Engineer,${engineerName}\n',
+                  s, count=1
+              )
+
+          home.write_text(s, encoding="utf-8")
+          print("OK: Engineer Name input + filename logic applied.")
+          PY
 
       - name: Remove dedicated email bar (UI only, safe)
         run: |
@@ -143,6 +231,14 @@ jobs:
           if ! grep -q "sos-watermark.png" "$CSS_FILE"; then
             printf '\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: 50%% 80px;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
           fi
+
+      - name: VERIFY CSV code is present
+        run: |
+          set -e
+          cd "${{ steps.findroot.outputs.root }}"
+          grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
+          grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
+          grep -n "@capacitor/share" client/src/pages/Home.tsx
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
