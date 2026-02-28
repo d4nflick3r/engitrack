@@ -62,10 +62,15 @@ jobs:
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
 
-      - name: Add SOS watermark logo
+      - name: Copy watermark image into app public folder
+        run: |
+          mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
+          cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
+
+      - name: Add SOS watermark logo (fixed patch)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-add-watermark-logo.patch"
+          patch -p1 < "${{ github.workspace }}/engitrack-add-watermark-logo-fixed.patch"
 
       - name: VERIFY CSV code is present
         run: |
