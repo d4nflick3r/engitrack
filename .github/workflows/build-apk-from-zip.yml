@@ -67,10 +67,81 @@ jobs:
           mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
           cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
 
-      - name: Add SOS watermark logo (fixed patch)
+      - name: Inject SOS watermark into Home.tsx (no patch)
         run: |
-          cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-add-watermark-logo-fixed.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path(r"${{ steps.findroot.outputs.root }}")
+          home = root / "client/src/pages/Home.tsx"
+          s = home.read_text(encoding="utf-8")
+
+          # If already injected, do nothing
+          if "sos-watermark.png" in s:
+            print("Watermark already present; skipping")
+            raise SystemExit(0)
+
+          # Ensure the outermost return wrapper is position: relative.
+          # We only change the first "<div" immediately after "return (".
+          s2, n = re.subn(r"(return\s*\(\s*)<div(\s*[^>]*)>",
+                         r"\1<div\2 style={{ position: \"relative\" }}>",
+                         s, count=1)
+          if n == 0:
+            # If it already has attributes, inject position: relative without clobbering.
+            s2, n = re.subn(r"(return\s*\(\s*)<div\s+([^>]*?)>",
+                            r"\1<div \2>",
+                            s, count=1)
+            if n == 0:
+              raise SystemExit("Could not find the outer return <div> in Home.tsx")
+
+            # If we couldn't safely inject style, we won't risk breaking the component.
+            # Instead insert a wrapper div just inside return(
+            s2 = re.sub(r"(return\s*\(\s*)",
+                        r"\1<div style={{ position: \"relative\" }}>\n",
+                        s, count=1)
+            # And close it just before the final ');' of the component
+            s2 = re.sub(r"\n\s*\);\s*\n\}",
+                        r"\n</div>\n  );\n}\n",
+                        s2, count=1)
+
+          # Insert watermark layer + content wrapper right after the opening return div.
+          # Add as first child so it sits behind everything.
+          insert = """
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              backgroundImage: "url('/sos-watermark.png')",
+              backgroundRepeat: "no-repeat",
+              backgroundPosition: "top center",
+              backgroundSize: "300px",
+              opacity: 0.06,
+              pointerEvents: "none",
+              zIndex: 0
+            }}
+          />
+          <div style={{ position: "relative", zIndex: 1 }}>
+          """
+
+          # Add insert after first opening div tag of return wrapper
+          s3, n = re.subn(r"(return\s*\(\s*<div[^>]*>\s*)", r"\1" + insert, s2, count=1)
+          if n == 0:
+            raise SystemExit("Could not inject watermark into Home.tsx")
+
+          # Close the wrapper div before the closing div that matches the return wrapper.
+          # We do this by adding one extra closing </div> just before the final return wrapper close.
+          # Add near the end: before the last occurrence of "\n</div>\n  );"
+          s4, n = re.subn(r"(\n</div>\s*\n\s*\);\s*)", r"\n</div>\1", s3, count=1)
+          if n == 0:
+            raise SystemExit("Could not close watermark content wrapper safely")
+
+          home.write_text(s4, encoding="utf-8")
+          print("Injected watermark into:", home)
+          PY
 
       - name: VERIFY CSV code is present
         run: |
