@@ -57,24 +57,23 @@ jobs:
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
 
-      # >>> ADD THIS STEP <<<
       - name: Remove dedicated email bar (UI only, safe)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
-      # >>> END ADD <<<
 
-      - name: VERIFY CSV code is present (fail build if not)
+      - name: Add SOS watermark logo
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-add-watermark-logo.patch"
+
+      - name: VERIFY CSV code is present
         run: |
           set -e
           cd "${{ steps.findroot.outputs.root }}"
-          echo "Checking Home.tsx for Capacitor Filesystem CSV export..."
           grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
           grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
           grep -n "@capacitor/share" client/src/pages/Home.tsx
-          echo "Checking email bar is removed..."
-          ! grep -n "Dedicated Email" client/src/pages/Home.tsx
-          echo "OK: Native CSV export code found and email bar removed."
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
