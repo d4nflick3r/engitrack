@@ -83,21 +83,14 @@ jobs:
             print("Watermark already present; skipping")
             raise SystemExit(0)
 
-          # Find the first JSX element after `return (` (we'll wrap its children, not replace tag).
           m = re.search(r"return\s*\(\s*(<\w+[^>]*>)", s)
           if not m:
-            raise SystemExit("Could not find the opening JSX tag after return( in Home.tsx")
+            raise SystemExit("Could not find opening JSX tag after return( in Home.tsx")
 
           open_tag = m.group(1)
-          # Ensure opening tag has `style={{ position: "relative" }}` without clobbering existing style
+
           if "style=" in open_tag:
-            # Append position: relative into existing style object if possible
-            open_tag_new = re.sub(
-              r'style=\{\{\s*',
-              'style={{ position: "relative", ',
-              open_tag,
-              count=1
-            )
+            open_tag_new = re.sub(r'style=\{\{\s*', 'style={{ position: "relative", ', open_tag, count=1)
           else:
             open_tag_new = open_tag[:-1] + ' style={{ position: "relative" }}>'
           s = s.replace(open_tag, open_tag_new, 1)
@@ -122,16 +115,14 @@ jobs:
           <div style={{ position: "relative", zIndex: 1 }}>
           """
 
-          # Insert after the modified opening tag (first occurrence after return()
           s, n = re.subn(r"(return\s*\(\s*<\w+[^>]*>\s*)", r"\1" + insert, s, count=1)
           if n == 0:
             raise SystemExit("Failed to inject watermark layer")
 
-          # Close wrapper before the first `);` that ends the return block.
           s = s.replace("\n</div>\n  );", "\n</div>\n</div>\n  );", 1)
 
           home.write_text(s, encoding="utf-8")
-          print("Injected watermark into:", home)
+          print("Injected watermark into Home.tsx")
           PY
 
       - name: VERIFY CSV code is present
@@ -148,16 +139,7 @@ jobs:
           set -o pipefail
           npm run build 2>&1 | tee build.log
 
-                - name: Show first build error
-        if: failure()
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          echo "---- FIRST ERROR (searching build.log) ----"
-          grep -n -m 1 -E "ERROR|Error:|TS[0-9]+|SyntaxError|ReferenceError|Build failed" build.log || true
-          echo "---- CONTEXT (last 60 lines) ----"
-          tail -n 60 build.log || true
-
-                - name: Upload build log
+      - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
