@@ -52,12 +52,16 @@ jobs:
           npm i -D @capacitor/cli @capacitor/core @capacitor/android
           npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Apply ALL fixes patch (UI + CSV + remove settings)
+      - name: Apply core fixes patch (CSV + Day Off + remove settings)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-noemail.patch"
-      
-     
+          patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
+
+      - name: Remove dedicated email input box (safe)
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe-p1.patch"
+
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
