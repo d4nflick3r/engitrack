@@ -64,6 +64,8 @@ jobs:
 
       - name: Copy watermark image into app public folder
         run: |
+          set -e
+          test -f "${{ github.workspace }}/sos-watermark.png"
           mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
           cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
 
@@ -77,17 +79,28 @@ jobs:
           home = root / "client/src/pages/Home.tsx"
           s = home.read_text(encoding="utf-8")
 
-          # If already injected, do nothing
           if "sos-watermark.png" in s:
             print("Watermark already present; skipping")
             raise SystemExit(0)
 
-          # Ensure the outermost return wrapper is position: relative.
-          s2, n = re.subn(r"(return\s*\(\s*)<div(\s*[^>]*)>",
-                          r"\1<div\2 style={{ position: \"relative\" }}>",
-                          s, count=1)
-          if n == 0:
-            raise SystemExit("Could not find the outer return <div> in Home.tsx")
+          # Find the first JSX element after `return (` (we'll wrap its children, not replace tag).
+          m = re.search(r"return\s*\(\s*(<\w+[^>]*>)", s)
+          if not m:
+            raise SystemExit("Could not find the opening JSX tag after return( in Home.tsx")
+
+          open_tag = m.group(1)
+          # Ensure opening tag has `style={{ position: "relative" }}` without clobbering existing style
+          if "style=" in open_tag:
+            # Append position: relative into existing style object if possible
+            open_tag_new = re.sub(
+              r'style=\{\{\s*',
+              'style={{ position: "relative", ',
+              open_tag,
+              count=1
+            )
+          else:
+            open_tag_new = open_tag[:-1] + ' style={{ position: "relative" }}>'
+          s = s.replace(open_tag, open_tag_new, 1)
 
           insert = """
           <div
@@ -109,15 +122,15 @@ jobs:
           <div style={{ position: "relative", zIndex: 1 }}>
           """
 
-          # Insert watermark layer + content wrapper right after the opening return div.
-          s3, n = re.subn(r"(return\s*\(\s*<div[^>]*>\s*)", r"\1" + insert, s2, count=1)
+          # Insert after the modified opening tag (first occurrence after return()
+          s, n = re.subn(r"(return\s*\(\s*<\w+[^>]*>\s*)", r"\1" + insert, s, count=1)
           if n == 0:
-            raise SystemExit("Could not inject watermark into Home.tsx")
+            raise SystemExit("Failed to inject watermark layer")
 
-          # Close the content wrapper before the return wrapper closes.
-          s4 = s3.replace("\n</div>\n  );", "\n</div>\n</div>\n  );", 1)
+          # Close wrapper before the first `);` that ends the return block.
+          s = s.replace("\n</div>\n  );", "\n</div>\n</div>\n  );", 1)
 
-          home.write_text(s4, encoding="utf-8")
+          home.write_text(s, encoding="utf-8")
           print("Injected watermark into:", home)
           PY
 
