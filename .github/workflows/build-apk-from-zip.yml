@@ -1,65 +1,146 @@
-      - name: Hide unpaid break box (UI only, runtime hide, never fails)
+name: Build APK from ZIP (Capacitor)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install unzip + patch
+        run: sudo apt-get update && sudo apt-get install -y unzip patch
+
+      - name: Unzip project
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          rm -rf project
+          mkdir -p project
+          unzip -q Engineer-Logbook.zip -d project
 
-          root = Path(r"${{ steps.findroot.outputs.root }}")
-          home = root / "client/src/pages/Home.tsx"
-          s = home.read_text(encoding="utf-8")
+      - name: Find project root
+        id: findroot
+        run: |
+          set -e
+          ROOT=$(find project -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
+          if [ -z "$ROOT" ]; then
+            echo "package.json not found"
+            exit 1
+          fi
+          echo "root=$ROOT" >> $GITHUB_OUTPUT
 
-          # 1) Ensure useEffect is available
-          # Try to add to existing react import: import React, { ... } from "react";
-          if re.search(r'from\s+["\']react["\']', s):
-            # If there is a named import block and useEffect isn't in it, add it.
-            m = re.search(r'import\s+[^;]*\{\s*([^}]*)\s*\}[^;]*from\s+["\']react["\']', s)
-            if m and "useEffect" not in m.group(1):
-              s = re.sub(
-                r'(import\s+[^;]*\{\s*)([^}]*)\s*(\}[^;]*from\s+["\']react["\'])',
-                lambda mm: mm.group(1) + (mm.group(2).strip() + ", useEffect") + " " + mm.group(3),
-                s,
-                count=1
-              )
-            elif not m:
-              # No named import block; add a separate import
-              if 'import { useEffect } from "react";' not in s and "useEffect" not in s:
-                s = 'import { useEffect } from "react";\n' + s
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-          # 2) Inject the useEffect inside the component (idempotent)
-          marker = "/* __HIDE_UNPAID_BREAK__ */"
-          if marker not in s:
-            hide_js = f'''
-  {marker}
-  useEffect(() => {{
-    try {{
-      const labels = Array.from(document.querySelectorAll("label"));
-      for (const l of labels) {{
-        const txt = (l.textContent || "").toLowerCase();
-        if (txt.includes("unpaid") && txt.includes("break")) {{
-          const container = l.closest("div");
-          if (container) {{
-            (container).style.display = "none";
-          }}
-        }}
-      }}
-    }} catch (e) {{
-      // never block the app
-    }}
-  }}, []);
-'''
-            # Put it after the first hook/useState declaration inside the component body
-            # Find the opening of the component function body: "{"
-            # Then insert after that.
-            s2, n = re.subn(r'(export\s+default\s+function\s+Home\s*\([^)]*\)\s*\{\s*)', r'\1' + hide_js, s, count=1)
-            if n == 0:
-              s2, n = re.subn(r'(function\s+Home\s*\([^)]*\)\s*\{\s*)', r'\1' + hide_js, s, count=1)
-              if n == 0:
-                # If we can't locate it, don't fail the build
-                print("WARNING: Could not locate Home component to inject hide code; skipping")
-                home.write_text(s, encoding="utf-8")
-                raise SystemExit(0)
-            s = s2
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
 
-          home.write_text(s, encoding="utf-8")
-          print("OK: Unpaid break runtime-hide injected (or already present).")
-          PY
+      - name: Install dependencies
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: npm install
+
+      - name: Install Capacitor deps
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          npm i -D @capacitor/cli @capacitor/core @capacitor/android
+          npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
+
+      - name: Apply CSV patch (known-working)
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
+
+      - name: Remove dedicated email bar (UI only, safe)
+        run: |
+          cd "${{ steps.findroot.outputs.root }}"
+          patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
+
+      - name: Hide unpaid break box (runtime hide via index.html, safest)
+        run: |
+          set -e
+          ROOT="${{ steps.findroot.outputs.root }}"
+
+          HTML="$ROOT/client/index.html"
+          if [ ! -f "$HTML" ]; then
+            HTML="$ROOT/index.html"
+          fi
+
+          if [ ! -f "$HTML" ]; then
+            echo "ERROR: Could not find index.html to inject unpaid-break hider"
+            exit 1
+          fi
+
+          if grep -q "__HIDE_UNPAID_BREAK__" "$HTML"; then
+            echo "Unpaid break hide script already present; skipping"
+            exit 0
+          fi
+
+          perl -0777 -i -pe 's@</body>@<script id="__HIDE_UNPAID_BREAK__">\n(function(){\n  function hideUnpaidBreak(){\n    try {\n      var nodes = Array.from(document.querySelectorAll(\"label,div,span,p\"));\n      for (var i=0;i<nodes.length;i++){\n        var t = (nodes[i].textContent||\"\").toLowerCase();\n        if (t.includes(\"unpaid\") && t.includes(\"break\")){\n          var c = nodes[i].closest(\"div\");\n          if (c) c.style.display = \"none\";\n        }\n      }\n    } catch(e) {}\n  }\n  if (document.readyState === \"loading\"){\n    document.addEventListener(\"DOMContentLoaded\", hideUnpaidBreak);\n  } else {\n    hideUnpaidBreak();\n  }\n  setTimeout(hideUnpaidBreak, 500);\n  setTimeout(hideUnpaidBreak, 1500);\n})();\n</script>\n</body>@s' "$HTML"
+
+      - name: Copy watermark image into app public folder
+        run: |
+          set -e
+          test -f "${{ github.workspace }}/sos-watermark.png"
+          mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
+          cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
+
+      - name: Add watermark CSS (safe)
+        run: |
+          set -e
+          CSS_FILE="${{ steps.findroot.outputs.root }}/client/src/index.css"
+          test -f "$CSS_FILE"
+          if grep -q "sos-watermark.png" "$CSS_FILE"; then
+            echo "Watermark CSS already present; skipping"
+            exit 0
+          fi
+          printf '\n/* SOS watermark background */\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: 50%% 80px;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
+
+      - name: VERIFY CSV code is present
+        run: |
+          set -e
+          cd "${{ steps.findroot.outputs.root }}"
+          grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
+          grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
+          grep -n "@capacitor/share" client/src/pages/Home.tsx
+
+      - name: Build web app (capture log)
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ steps.findroot.outputs.root }}/build.log
+
+      - name: Build Android APK
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
+          npx cap add android || true
+          npx cap sync android
+
+          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_FILE" ]; then
+            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
+          fi
+
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
