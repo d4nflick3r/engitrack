@@ -11,8 +11,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
+      - name: Install unzip + patch
+        run: sudo apt-get update && sudo apt-get install -y unzip patch
 
       - name: Unzip project
         run: |
@@ -53,6 +53,7 @@ jobs:
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
+
       - name: Build Android (init + sync)
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
@@ -63,8 +64,10 @@ jobs:
       - name: One-step fix: force Kotlin stdlib version
         working-directory: ${{ steps.findroot.outputs.root }}/android
         run: |
+          set -e
           if [ ! -f build.gradle ]; then
             echo "android/build.gradle not found"
+            ls -la
             exit 1
           fi
 
@@ -84,49 +87,20 @@ jobs:
           GRADLE
           fi
 
+      - name: Set app display name
+        working-directory: ${{ steps.findroot.outputs.root }}/android
+        run: |
+          set -e
+          STRINGS_FILE="app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_FILE" ]; then
+            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
+          else
+            echo "WARNING: strings.xml not found at $STRINGS_FILE (skipping label change)"
+          fi
+
       - name: Assemble Debug APK
         working-directory: ${{ steps.findroot.outputs.root }}/android
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
-      
-    
-        run: |
-          set -e
-          cd android || cd "${{ steps.findroot.outputs.root }}/android"
-          if [ ! -f build.gradle ]; then
-            echo "ERROR: android/build.gradle not found"
-            ls -la
-            exit 1
-          fi
-
-          # Only add once
-          if grep -q "ONE_STEP_KOTLIN_FORCE" build.gradle; then
-            echo "Kotlin force already applied; skipping"
-            exit 0
-          fi
-
-          cat >> build.gradle <<'GRADLE'
-
-          // ONE_STEP_KOTLIN_FORCE (added by workflow)
-          subprojects {
-            configurations.all {
-              resolutionStrategy {
-                force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
-                force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"
-                force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"
-              }
-            }
-          }
-          GRADLE
-
-          # Set app display name
-          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
-          if [ -f "$STRINGS_FILE" ]; then
-            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
-          fi
-
-          cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
