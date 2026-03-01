@@ -1,0 +1,31 @@
+--- a/client/src/pages/Home.tsx
++++ b/client/src/pages/Home.tsx
+@@ -145,9 +145,9 @@
+                 <CardTitle className="text-lg flex items-center gap-2 font-bold text-slate-800">
+                   Week Details
+                 </CardTitle>
+-                <CardDescription>Set week commencing date and optional email</CardDescription>
++                <CardDescription>Set week commencing date</CardDescription>
+               </CardHeader>
+-              <CardContent className="pt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
++              <CardContent className="pt-5 grid grid-cols-1 gap-6">
+                 <div className="space-y-2">
+                   <Label className="font-semibold text-slate-700">Week Commencing (Mon)</Label>
+                   <Input 
+@@ -157,16 +157,6 @@
+                     className="font-mono text-base"
+                   />
+                 </div>
+-                <div className="space-y-2">
+-                  <Label className="font-semibold text-slate-700">Dedicated Email Address</Label>
+-                  <Input 
+-                    type="email" 
+-                    placeholder="manager@example.com"
+-                    value={state.submitEmail || ''}
+-                    onChange={(e) => setSubmitEmail(e.target.value)}
+-                    className="font-mono text-base"
+-                  />
+-                </div>
+               </CardContent>
+             </Card>
+ 
