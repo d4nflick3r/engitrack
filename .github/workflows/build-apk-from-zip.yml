@@ -1,4 +1,4 @@
-name: Build APK (from engitrack-main)
+name: Build APK (auto-detect project root)
 
 on:
   workflow_dispatch:
@@ -7,13 +7,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: engitrack-main
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Find project root (package.json)
+        id: findroot
+        run: |
+          set -e
+          ROOT=$(find engitrack-main -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
+          echo "Detected root: $ROOT"
+          if [ -z "$ROOT" ]; then
+            echo "ERROR: package.json not found under engitrack-main"
+            echo "Contents of engitrack-main:"
+            ls -la engitrack-main || true
+            exit 1
+          fi
+          echo "root=$ROOT" >> $GITHUB_OUTPUT
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -27,17 +37,21 @@ jobs:
           java-version: "21"
 
       - name: Install dependencies
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
       - name: Build web app
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
 
       - name: Install Capacitor + plugins
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npm install -D @capacitor/cli @capacitor/core @capacitor/android
           npm install @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
       - name: Add Android + Sync
+        working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npx cap add android || true
           npx cap sync android
@@ -49,8 +63,8 @@ jobs:
           fi
 
       - name: Build Debug APK
+        working-directory: ${{ steps.findroot.outputs.root }}/android
         run: |
-          cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
@@ -58,4 +72,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: engitrack-main/android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
