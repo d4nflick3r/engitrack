@@ -1,4 +1,4 @@
-name: Build APK from ZIP (Capacitor)
+name: Build APK (from engitrack-main)
 
 on:
   workflow_dispatch:
@@ -7,30 +7,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: engitrack-main
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
-
-      - name: Unzip project
-        run: |
-          rm -rf project
-          mkdir -p project
-          unzip -q Engineer-Logbook.zip -d project
-
-      - name: Find project root
-        id: findroot
-        run: |
-          set -e
-          ROOT=$(find project -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
-          echo "Detected root: $ROOT"
-          if [ -z "$ROOT" ]; then
-            echo "ERROR: package.json not found"
-            exit 1
-          fi
-          echo "root=$ROOT" >> $GITHUB_OUTPUT
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -44,28 +27,20 @@ jobs:
           java-version: "21"
 
       - name: Install dependencies
-        working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
-      - name: Install Capacitor + plugins (needed for build)
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          npm install -D @capacitor/cli @capacitor/core @capacitor/android
-          npm install @capacitor/filesystem @capacitor/share
-
       - name: Build web app
-        working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
 
-      - name: Add Android + Sync (Capacitor)
-        working-directory: ${{ steps.findroot.outputs.root }}
+      - name: Install Capacitor + plugins
         run: |
-          set -e
-          CAP=./node_modules/.bin/cap
+          npm install -D @capacitor/cli @capacitor/core @capacitor/android
+          npm install @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-          $CAP init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
-          $CAP add android || true
-          $CAP sync android
+      - name: Add Android + Sync
+        run: |
+          npx cap add android || true
+          npx cap sync android
 
           # Set launcher/display name under icon
           STRINGS_FILE="android/app/src/main/res/values/strings.xml"
@@ -74,8 +49,8 @@ jobs:
           fi
 
       - name: Build Debug APK
-        working-directory: ${{ steps.findroot.outputs.root }}/android
         run: |
+          cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
@@ -83,4 +58,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
+          path: engitrack-main/android/app/build/outputs/apk/debug/app-debug.apk
