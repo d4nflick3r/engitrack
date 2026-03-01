@@ -17,12 +17,13 @@ jobs:
       - name: Unzip project
         run: |
           rm -rf project
-          mkdir project
+          mkdir -p project
           unzip -q Engineer-Logbook.zip -d project
 
       - name: Find project root
         id: findroot
         run: |
+          set -e
           ROOT=$(find project -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
           if [ -z "$ROOT" ]; then
             echo "package.json not found"
@@ -47,8 +48,7 @@ jobs:
 
       - name: Install Capacitor CLI
         working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          npm install -D @capacitor/cli @capacitor/core @capacitor/android
+        run: npm install -D @capacitor/cli @capacitor/core @capacitor/android
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
@@ -60,8 +60,8 @@ jobs:
           npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
           npx cap add android || true
           npx cap sync android
-          
-      - name: One-step fix: force Kotlin stdlib version
+
+      - name: One-step fix: force Kotlin stdlib version (no heredoc)
         working-directory: ${{ steps.findroot.outputs.root }}/android
         run: |
           set -e
@@ -71,21 +71,12 @@ jobs:
             exit 1
           fi
 
-          if ! grep -q "ONE_STEP_KOTLIN_FORCE" build.gradle; then
-            cat >> build.gradle <<'GRADLE'
-
-          // ONE_STEP_KOTLIN_FORCE
-          subprojects {
-            configurations.all {
-              resolutionStrategy {
-                force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
-                force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"
-                force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"
-              }
-            }
-          }
-          GRADLE
+          if grep -q "ONE_STEP_KOTLIN_FORCE" build.gradle; then
+            echo "Kotlin force already applied; skipping"
+            exit 0
           fi
+
+          printf '\n// ONE_STEP_KOTLIN_FORCE\nsubprojects {\n  configurations.all {\n    resolutionStrategy {\n      force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"\n      force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"\n      force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"\n    }\n  }\n}\n' >> build.gradle
 
       - name: Set app display name
         working-directory: ${{ steps.findroot.outputs.root }}/android
@@ -95,7 +86,7 @@ jobs:
           if [ -f "$STRINGS_FILE" ]; then
             sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
           else
-            echo "WARNING: strings.xml not found at $STRINGS_FILE (skipping label change)"
+            echo "WARNING: $STRINGS_FILE not found (skipping label change)"
           fi
 
       - name: Assemble Debug APK
