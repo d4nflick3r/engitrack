@@ -60,6 +60,36 @@ jobs:
           npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
           npx cap add android || true
           npx cap sync android
+                - name: One-step fix: force Kotlin stdlib version (prevents duplicate classes)
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          set -e
+          cd android || cd "${{ steps.findroot.outputs.root }}/android"
+          if [ ! -f build.gradle ]; then
+            echo "ERROR: android/build.gradle not found"
+            ls -la
+            exit 1
+          fi
+
+          # Only add once
+          if grep -q "ONE_STEP_KOTLIN_FORCE" build.gradle; then
+            echo "Kotlin force already applied; skipping"
+            exit 0
+          fi
+
+          cat >> build.gradle <<'GRADLE'
+
+          // ONE_STEP_KOTLIN_FORCE (added by workflow)
+          subprojects {
+            configurations.all {
+              resolutionStrategy {
+                force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
+                force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"
+                force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"
+              }
+            }
+          }
+          GRADLE
 
           # Set app display name
           STRINGS_FILE="android/app/src/main/res/values/strings.xml"
