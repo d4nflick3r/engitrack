@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Setup Java
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -52,106 +52,45 @@ jobs:
           npm i -D @capacitor/cli @capacitor/core @capacitor/android
           npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Apply CSV patch
+      - name: Apply CSV patch (known-working)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
 
-      - name: Remove email bar
+      - name: Remove dedicated email bar (UI only, safe)
         run: |
           cd "${{ steps.findroot.outputs.root }}"
           patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
 
-      - name: Add Engineer Name + CSV filename logic (SAFE)
+      - name: Add Engineer Name field + use in CSV filename (no YAML-risk)
         run: |
           set -e
           cd "${{ steps.findroot.outputs.root }}"
+          node -e "const fs=require('fs');const p='client/src/pages/Home.tsx';if(!fs.existsSync(p)){console.log('Home.tsx missing, skip');process.exit(0)};let s=fs.readFileSync(p,'utf8');if(!s.includes('__ENGINEER_NAME_FIELD__')){s=s.replace(/(export\\s+default\\s+function\\s+Home\\s*\\([^)]*\\)\\s*\\{\\s*)/,m=>m+\"\\n  /* __ENGINEER_NAME_FIELD__ */\\n  const [engineerName, setEngineerName] = useState(\\\"\\\");\\n  const engineerSlug = (engineerName || \\\"engineer\\\").trim().toLowerCase().replace(/[^a-z0-9]+/g,\\\"-\\\").replace(/(^-|-$)/g,\\\"\\\");\\n  const fileName = `timesheet-${engineerSlug}-${new Date().toISOString().slice(0,10)}.csv`;\\n\");} if(!s.includes('__ENGINEER_NAME_INPUT__')){s=s.replace(/(<h1[^>]*>.*?<\\/h1>)/s, m=>m+\"\\n          {/* __ENGINEER_NAME_INPUT__ */}\\n          <div className=\\\"w-full max-w-3xl mx-auto px-4 mt-2\\\">\\n            <label className=\\\"block text-sm font-medium mb-1\\\">Engineer Name</label>\\n            <input value={engineerName} onChange={(e)=>setEngineerName(e.target.value)} placeholder=\\\"Type your name\\\" className=\\\"w-full rounded-md border px-3 py-2 text-base\\\" />\\n          </div>\\n\");} s=s.replace(/(Filesystem\\.writeFile\\s*\\(\\s*\\{[\\s\\S]*?\\bpath\\s*:\\s*)(['\\\"][^'\\\"]+\\.csv['\\\"])/, (m,a)=>a+'fileName'); fs.writeFileSync(p,s,'utf8'); console.log('OK: engineer name + filename added');"
 
-          cat <<'PY' > engineer_patch.py
-from pathlib import Path
-import re
-
-home = Path("client/src/pages/Home.tsx")
-if not home.exists():
-    print("Home.tsx not found")
-    exit(0)
-
-s = home.read_text(encoding="utf-8")
-
-if "__ENGINEER_NAME_FIELD__" not in s:
-
-    # Ensure useState is imported
-    match = re.search(r'import\s+[^;]*\{([^}]*)\}[^;]*from\s+[\'"]react[\'"]', s)
-    if match and "useState" not in match.group(1):
-        s = re.sub(
-            r'(import\s+[^;]*\{)([^}]*)(\}[^;]*from\s+[\'"]react[\'"])',
-            lambda m: m.group(1) + m.group(2) + ", useState" + m.group(3),
-            s,
-            count=1
-        )
-
-    state_block = """
-  /* __ENGINEER_NAME_FIELD__ */
-  const [engineerName, setEngineerName] = useState("");
-  const fileName = `timesheet-${engineerName || "engineer"}-${new Date().toISOString().slice(0,10)}.csv`;
-"""
-
-    s = re.sub(
-        r'(export\s+default\s+function\s+Home\s*\([^)]*\)\s*\{)',
-        r'\1' + state_block,
-        s,
-        count=1
-    )
-
-    # Replace CSV filename
-    s = re.sub(
-        r'(path:\s*)["\'][^"\']+\.csv["\']',
-        r'\1fileName',
-        s,
-        count=1
-    )
-
-home.write_text(s, encoding="utf-8")
-print("Engineer name patch applied")
-PY
-
-          python3 engineer_patch.py
-
-      - name: Hide unpaid break safely
+      - name: Copy watermark image into app public folder
         run: |
           set -e
-          cd "${{ steps.findroot.outputs.root }}"
-
-          cat <<'PY' > hide_unpaid.py
-from pathlib import Path
-import re
-
-home = Path("client/src/pages/Home.tsx")
-if not home.exists():
-    exit(0)
-
-s = home.read_text(encoding="utf-8")
-
-if "Unpaid Break" in s:
-    s = s.replace("Unpaid Break", "Hidden Break")
-
-home.write_text(s, encoding="utf-8")
-print("Unpaid break hidden safely")
-PY
-
-          python3 hide_unpaid.py
-
-      - name: Copy watermark
-        run: |
+          test -f "${{ github.workspace }}/sos-watermark.png"
           mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
           cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
 
-      - name: Add watermark CSS
+      - name: Add watermark CSS (safe)
         run: |
-          CSS="${{ steps.findroot.outputs.root }}/client/src/index.css"
-          if ! grep -q "sos-watermark.png" "$CSS"; then
-            printf '\nbody::before{content:"";position:fixed;top:0;left:0;width:100%%;height:100%%;background:url("/sos-watermark.png") no-repeat 50%% 80px;background-size:300px;opacity:0.06;pointer-events:none;}\n' >> "$CSS"
+          set -e
+          CSS_FILE="${{ steps.findroot.outputs.root }}/client/src/index.css"
+          test -f "$CSS_FILE"
+          if ! grep -q "sos-watermark.png" "$CSS_FILE"; then
+            printf '\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: 50%% 80px;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
           fi
+
+      - name: VERIFY CSV code is present
+        run: |
+          set -e
+          cd "${{ steps.findroot.outputs.root }}"
+          grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
+          grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
+          grep -n "@capacitor/share" client/src/pages/Home.tsx
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
@@ -163,6 +102,12 @@ PY
           npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
           npx cap add android || true
           npx cap sync android
+
+          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_FILE" ]; then
+            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
+          fi
+
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
