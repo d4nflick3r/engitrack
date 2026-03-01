@@ -47,24 +47,21 @@ jobs:
             exit 0
           fi
 
-          # 1) Ensure body is a stacking context
-          if ! grep -q "body[[:space:]]*{[^}]*position:[[:space:]]*relative" "$CSS"; then
+          # Ensure body is a stacking context
+          if ! grep -Eq 'body[[:space:]]*\{[^}]*position:[[:space:]]*relative' "$CSS"; then
             printf '\nbody{position:relative;}\n' >> "$CSS"
           fi
 
-          # 2) Force watermark behind everything (z-index:-1)
-          perl -0777 -i -pe 's/(body::before\s*\{[^}]*?)z-index:\s*-?\d+\s*;/$1z-index: -1;/s' "$CSS"
+          # Force watermark behind everything (z-index:-1). If no z-index exists, add it.
+          if grep -Eq 'body::before[[:space:]]*\{[^}]*z-index:' "$CSS"; then
+            perl -0777 -i -pe 's/(body::before\s*\{[^}]*?)z-index:\s*-?\d+\s*;/$1z-index: -1;/s' "$CSS"
+          else
+            perl -0777 -i -pe 's/(body::before\s*\{)/$1\n  z-index: -1;\n/s' "$CSS"
+          fi
 
-          # 3) Ensure app root is above
+          # Ensure app root is above
           if ! grep -q "__ENGITRACK_ROOT_Z__" "$CSS"; then
-            cat >> "$CSS" <<'CSSFIX'
-
-/* __ENGITRACK_ROOT_Z__ */
-#root, #app {
-  position: relative;
-  z-index: 1;
-}
-CSSFIX
+            printf '\n/* __ENGITRACK_ROOT_Z__ */\n#root, #app {\n  position: relative;\n  z-index: 1;\n}\n' >> "$CSS"
           fi
 
           echo "OK: watermark forced behind app UI"
