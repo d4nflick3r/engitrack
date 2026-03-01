@@ -36,6 +36,39 @@ jobs:
           fi
           echo "root=$ROOT" >> $GITHUB_OUTPUT
 
+      - name: Fix watermark layering (keep app visible)
+        run: |
+          set -e
+          ROOT="${{ steps.findroot.outputs.root }}"
+          CSS="$ROOT/client/src/index.css"
+
+          if [ ! -f "$CSS" ]; then
+            echo "No client/src/index.css found, skipping watermark layering fix"
+            exit 0
+          fi
+
+          # 1) Ensure body is a stacking context
+          if ! grep -q "body[[:space:]]*{[^}]*position:[[:space:]]*relative" "$CSS"; then
+            printf '\nbody{position:relative;}\n' >> "$CSS"
+          fi
+
+          # 2) Force watermark behind everything (z-index:-1)
+          perl -0777 -i -pe 's/(body::before\s*\{[^}]*?)z-index:\s*-?\d+\s*;/$1z-index: -1;/s' "$CSS"
+
+          # 3) Ensure app root is above
+          if ! grep -q "__ENGITRACK_ROOT_Z__" "$CSS"; then
+            cat >> "$CSS" <<'CSSFIX'
+
+/* __ENGITRACK_ROOT_Z__ */
+#root, #app {
+  position: relative;
+  z-index: 1;
+}
+CSSFIX
+          fi
+
+          echo "OK: watermark forced behind app UI"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -57,9 +90,18 @@ jobs:
           npm install -D @capacitor/cli @capacitor/core @capacitor/android
           npm install @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
-      - name: Build web app
+      - name: Build web app (capture log)
         working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ steps.findroot.outputs.root }}/build.log
 
       - name: Add Android + Sync
         working-directory: ${{ steps.findroot.outputs.root }}
