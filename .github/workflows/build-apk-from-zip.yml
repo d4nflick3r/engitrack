@@ -1,4 +1,4 @@
-name: Build APK (auto-detect project root)
+name: Build APK from Engineer-Logbook.zip
 
 on:
   workflow_dispatch:
@@ -11,16 +11,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Unzip Engineer-Logbook.zip
+        run: |
+          rm -rf project
+          mkdir -p project
+          unzip -q engitrack-main/Engineer-Logbook.zip -d project
+          echo "Top-level after unzip:"
+          ls -la project
+
       - name: Find project root (package.json)
         id: findroot
         run: |
           set -e
-          ROOT=$(find engitrack-main -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
+          ROOT=$(find project -maxdepth 8 -name package.json -print -quit | xargs -I{} dirname {})
           echo "Detected root: $ROOT"
           if [ -z "$ROOT" ]; then
-            echo "ERROR: package.json not found under engitrack-main"
-            echo "Contents of engitrack-main:"
-            ls -la engitrack-main || true
+            echo "ERROR: package.json not found after unzip"
+            echo "Tree (depth 3):"
+            find project -maxdepth 3 -type d -print
             exit 1
           fi
           echo "root=$ROOT" >> $GITHUB_OUTPUT
@@ -40,23 +51,23 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
-      - name: Build web app
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm run build
-
       - name: Install Capacitor + plugins
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           npm install -D @capacitor/cli @capacitor/core @capacitor/android
           npm install @capacitor/filesystem @capacitor/share @capacitor/clipboard
 
+      - name: Build web app
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: npm run build
+
       - name: Add Android + Sync
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
-          npx cap add android || true
-          npx cap sync android
+          ./node_modules/.bin/cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
+          ./node_modules/.bin/cap add android || true
+          ./node_modules/.bin/cap sync android
 
-          # Set launcher/display name under icon
           STRINGS_FILE="android/app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_FILE" ]; then
             sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
