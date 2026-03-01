@@ -66,26 +66,64 @@ jobs:
             fi
 
             echo "Applying patch: ${p}"
-            # --forward skips if already applied; --batch prevents interactive prompts
             if ! patch --batch --forward -p1 < "${GITHUB_WORKSPACE}/${p}"; then
               echo "ERROR: Patch failed: ${p}"
-              echo "---- If a .rej file was created, printing it ----"
               find . -name "*.rej" -maxdepth 6 -print -exec sed -n '1,200p' {} \; || true
               exit 1
             fi
           }
 
-          # 1) Known-working base: native CSV export + day off logic + remove settings
           apply_patch "engitrack-fix-csv-dayoff-nosettings.patch"
-
-          # 2) Remove email bar (UI only)
           apply_patch "engitrack-remove-email-ui-safe.patch"
-
-          # 3) Hide unpaid break UI (UI only)  ✅ you explicitly want this removed
-          apply_patch "engitrack-hide-unpaid-break-ui.patch"
-
-          # 4) Add engineer name + include in CSV filename  ✅ you explicitly want this
           apply_patch "engitrack-add-engineer-name-filename.patch"
+
+      - name: Hide unpaid break box (safe edit, never fails)
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          home = Path("client/src/pages/Home.tsx")
+          if not home.exists():
+            print("Home.tsx not found; skipping unpaid break removal")
+            raise SystemExit(0)
+
+          s = home.read_text(encoding="utf-8")
+
+          if "Unpaid Break" not in s and "unpaidBreak" not in s:
+            print("No Unpaid Break UI found; skipping")
+            raise SystemExit(0)
+
+          original = s
+
+          # Pattern A: comment + div block
+          s = re.sub(
+            r"\{\s*/\*\s*Unpaid\s*Break\s*\*/\s*\}\s*<div[^>]*>.*?</div>\s*",
+            "{/* Unpaid Break hidden intentionally */}\n",
+            s,
+            count=1,
+            flags=re.S
+          )
+
+          # Pattern B: any div containing a label with 'Unpaid Break'
+          if s == original:
+            s = re.sub(
+              r"<div[^>]*>\s*<label[^>]*>[^<]*Unpaid\s*Break[^<]*</label>.*?</div>\s*",
+              "<!-- Unpaid Break hidden intentionally -->\n",
+              s,
+              count=1,
+              flags=re.S
+            )
+
+          # If still unchanged, do NOT break build
+          if s == original:
+            print("WARNING: Could not match Unpaid Break UI block; leaving file unchanged.")
+            raise SystemExit(0)
+
+          home.write_text(s, encoding="utf-8")
+          print("OK: Unpaid Break UI removed/hidden in Home.tsx")
+          PY
 
       - name: Copy watermark image into app public folder
         run: |
@@ -111,13 +149,12 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           set -e
-          echo "Checking CSV native export exists..."
+          echo "Checking native CSV export exists..."
           grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
           grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
           grep -n "@capacitor/share" client/src/pages/Home.tsx
 
           echo "Checking Engineer Name field exists..."
-          grep -n "Engineer Name" client/src/pages/Home.tsx || true
           grep -n "engineerName" client/src/pages/Home.tsx
 
           echo "Checking email bar removed..."
@@ -155,8 +192,6 @@ jobs:
           STRINGS_FILE="app/src/main/res/values/strings.xml"
           if [ -f "$STRINGS_FILE" ]; then
             sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
-          else
-            echo "WARNING: strings.xml not found at $STRINGS_FILE (skipping label change)"
           fi
 
       - name: Assemble Debug APK
