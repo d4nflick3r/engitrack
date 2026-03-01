@@ -1,213 +1,79 @@
-name: Build APK from ZIP (Capacitor)
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install unzip + patch
-        run: sudo apt-get update && sudo apt-get install -y unzip patch
-
-      - name: Unzip project
-        run: |
-          rm -rf project
-          mkdir -p project
-          unzip -q Engineer-Logbook.zip -d project
-
-      - name: Find project root
-        id: findroot
-        run: |
-          set -e
-          ROOT=$(find project -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
-          if [ -z "$ROOT" ]; then
-            echo "package.json not found"
-            exit 1
-          fi
-          echo "root=$ROOT" >> $GITHUB_OUTPUT
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Setup Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Install dependencies
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm install
-
-      - name: Install Capacitor deps
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          npm i -D @capacitor/cli @capacitor/core @capacitor/android
-          npm i @capacitor/filesystem @capacitor/share @capacitor/clipboard
-
-      - name: Apply CSV patch (known-working)
-        run: |
-          cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-fix-csv-dayoff-nosettings.patch"
-
-      - name: Remove dedicated email bar (UI only, safe)
-        run: |
-          cd "${{ steps.findroot.outputs.root }}"
-          patch -p1 < "${{ github.workspace }}/engitrack-remove-email-ui-safe.patch"
-
-      - name: Add Engineer Name field + include in CSV filename (robust, fixes broken fileName)
+      - name: Add Engineer Name field + include in CSV filename (robust)
         run: |
           set -e
           cd "${{ steps.findroot.outputs.root }}"
 
-          cat <<'JS' > engineer_name_patch.js
-          const fs = require("fs");
+          cat <<'JS' > engineer_name_patch.cjs
+const fs = require("fs");
 
-          const file = "client/src/pages/Home.tsx";
-          if (!fs.existsSync(file)) {
-            console.log("Home.tsx not found, skipping.");
-            process.exit(0);
-          }
+const file = "client/src/pages/Home.tsx";
+if (!fs.existsSync(file)) {
+  console.log("Home.tsx not found, skipping.");
+  process.exit(0);
+}
 
-          let s = fs.readFileSync(file, "utf8");
+let s = fs.readFileSync(file, "utf8");
 
-          // 0) Repair previous bad injection if present
-          s = s.replace(/const\s+fileName\s*=\s*;\s*/g, "");
+// Repair broken injection if present
+s = s.replace(/const\s+fileName\s*=\s*;\s*/g, "");
 
-          // 1) Ensure useState is imported from react
-          // Supports: import React, { ... } from "react"; OR import { ... } from "react";
-          const reactNamed = /import\s+[^;]*\{\s*([^}]*)\s*\}[^;]*from\s+["']react["']/m;
-          const m = s.match(reactNamed);
-          if (m && !m[1].includes("useState")) {
-            s = s.replace(reactNamed, (full, inside) => {
-              const cleaned = inside.trim();
-              const next = cleaned.length ? `${cleaned}, useState` : "useState";
-              return full.replace(inside, next);
-            });
-          }
+// Ensure useState is imported
+const reactImport = /import\s+[^;]*\{([^}]*)\}[^;]*from\s+["']react["']/m;
+const match = s.match(reactImport);
+if (match && !match[1].includes("useState")) {
+  s = s.replace(
+    reactImport,
+    (full, inside) => full.replace(inside, inside + ", useState")
+  );
+}
 
-          // 2) Inject state/helpers once
-          if (!s.includes("/* __ENGINEER_NAME_FIELD__ */")) {
-            const block =
-          `
-            /* __ENGINEER_NAME_FIELD__ */
-            const [engineerName, setEngineerName] = useState(() => {
-              try { return localStorage.getItem("engitrack_engineer_name") || ""; } catch { return ""; }
-            });
+// Inject state block once
+if (!s.includes("__ENGINEER_NAME_FIELD__")) {
+  const block = `
+  /* __ENGINEER_NAME_FIELD__ */
+  const [engineerName, setEngineerName] = useState("");
+  const engineerSlug = (engineerName || "engineer")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  const fileName = \`timesheet-\${engineerSlug}-\${new Date().toISOString().slice(0,10)}.csv\`;
+`;
 
-            const engineerSlug = (engineerName || "engineer")
-              .trim()
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/(^-|-$)/g, "");
+  s = s.replace(
+    /(export\s+default\s+function\s+Home\s*\([^)]*\)\s*\{)/,
+    `$1${block}`
+  );
+}
 
-            const onEngineerNameChange = (v: string) => {
-              setEngineerName(v);
-              try { localStorage.setItem("engitrack_engineer_name", v); } catch {}
-            };
+// Inject UI once
+if (!s.includes("__ENGINEER_NAME_INPUT__")) {
+  const ui = `
+        {/* __ENGINEER_NAME_INPUT__ */}
+        <div className="w-full max-w-3xl mx-auto px-4 mt-2">
+          <label className="block text-sm font-medium mb-1">Engineer Name</label>
+          <input
+            value={engineerName}
+            onChange={(e)=>setEngineerName(e.target.value)}
+            placeholder="Type your name"
+            className="w-full rounded-md border px-3 py-2 text-base"
+          />
+        </div>
+`;
 
-            const todayIso = new Date().toISOString().slice(0,10);
-            const fileName = \`timesheet-\${engineerSlug}-\${todayIso}.csv\`;
-          `;
+  if (s.includes("</h1>")) {
+    s = s.replace("</h1>", "</h1>" + ui);
+  }
+}
 
-            // Put immediately after Home() opening brace
-            s = s.replace(
-              /(export\s+default\s+function\s+Home\s*\([^)]*\)\s*\{\s*)/,
-              `$1${block}\n`
-            );
-          }
+// Replace literal csv path with fileName
+s = s.replace(
+  /(Filesystem\.writeFile\s*\(\s*\{[\s\S]*?\bpath\s*:\s*)(["'][^"']+\.csv["'])/m,
+  `$1fileName`
+);
 
-          // 3) Inject UI once (after first </h1> if present)
-          if (!s.includes("{/* __ENGINEER_NAME_INPUT__ */}")) {
-            const ui =
-          `
-                  {/* __ENGINEER_NAME_INPUT__ */}
-                  <div className="w-full max-w-3xl mx-auto px-4 mt-2">
-                    <label className="block text-sm font-medium mb-1">Engineer Name</label>
-                    <input
-                      value={engineerName}
-                      onChange={(e) => onEngineerNameChange(e.target.value)}
-                      placeholder="Type your name"
-                      className="w-full rounded-md border px-3 py-2 text-base"
-                    />
-                  </div>
-          `;
+fs.writeFileSync(file, s, "utf8");
+console.log("Engineer name patch applied successfully.");
+JS
 
-            if (s.match(/<\/h1>/)) {
-              s = s.replace(/<\/h1>/, (x) => `${x}${ui}`);
-            } else {
-              // fallback: right after first return <div...>
-              s = s.replace(/(return\s*\(\s*<div[^>]*>\s*)/, `$1${ui}`);
-            }
-          }
-
-          // 4) Ensure Filesystem.writeFile uses fileName (only if it currently uses a quoted .csv)
-          s = s.replace(
-            /(Filesystem\.writeFile\s*\(\s*\{\s*[\s\S]*?\bpath\s*:\s*)(["'][^"']+\.csv["'])/m,
-            `$1fileName`
-          );
-
-          fs.writeFileSync(file, s, "utf8");
-          console.log("OK: Engineer name + filename patch applied.");
-          JS
-
-          node engineer_name_patch.js
-
-      - name: Copy watermark image into app public folder
-        run: |
-          set -e
-          test -f "${{ github.workspace }}/sos-watermark.png"
-          mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
-          cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
-
-      - name: Add watermark CSS (move logo down slightly)
-        run: |
-          set -e
-          CSS_FILE="${{ steps.findroot.outputs.root }}/client/src/index.css"
-          test -f "$CSS_FILE"
-          if ! grep -q "sos-watermark.png" "$CSS_FILE"; then
-            printf '\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: 50%% 110px;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
-          fi
-
-      - name: VERIFY CSV code is present
-        run: |
-          set -e
-          cd "${{ steps.findroot.outputs.root }}"
-          grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
-          grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
-          grep -n "@capacitor/share" client/src/pages/Home.tsx
-          grep -n "fileName" client/src/pages/Home.tsx
-
-      - name: Build web app
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm run build
-
-      - name: Build Android APK
-        working-directory: ${{ steps.findroot.outputs.root }}
-        run: |
-          npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
-          npx cap add android || true
-          npx cap sync android
-
-          # Set launcher/display name
-          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
-          if [ -f "$STRINGS_FILE" ]; then
-            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
-          fi
-
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
+          node engineer_name_patch.cjs
