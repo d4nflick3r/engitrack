@@ -47,6 +47,12 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
+      - name: Install Capacitor + plugins (needed for build)
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          npm install -D @capacitor/cli @capacitor/core @capacitor/android
+          npm install @capacitor/filesystem @capacitor/share
+
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm run build
@@ -55,11 +61,7 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           set -e
-          if [ -x ./node_modules/.bin/cap ]; then
-            CAP=./node_modules/.bin/cap
-          else
-            CAP="npx cap"
-          fi
+          CAP=./node_modules/.bin/cap
 
           $CAP init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
           $CAP add android || true
