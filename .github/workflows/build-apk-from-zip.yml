@@ -1,79 +1,67 @@
-      - name: Add Engineer Name field + include in CSV filename (robust)
+name: Build APK from ZIP (Capacitor)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Unzip project
         run: |
-          set -e
-          cd "${{ steps.findroot.outputs.root }}"
+          rm -rf project
+          mkdir project
+          unzip -q Engineer-Logbook.zip -d project
 
-          cat <<'JS' > engineer_name_patch.cjs
-const fs = require("fs");
+      - name: Find project root
+        id: findroot
+        run: |
+          ROOT=$(find project -maxdepth 6 -name package.json -print -quit | xargs -I{} dirname {})
+          echo "root=$ROOT" >> $GITHUB_OUTPUT
 
-const file = "client/src/pages/Home.tsx";
-if (!fs.existsSync(file)) {
-  console.log("Home.tsx not found, skipping.");
-  process.exit(0);
-}
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-let s = fs.readFileSync(file, "utf8");
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
 
-// Repair broken injection if present
-s = s.replace(/const\s+fileName\s*=\s*;\s*/g, "");
+      - name: Install dependencies
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: npm install
 
-// Ensure useState is imported
-const reactImport = /import\s+[^;]*\{([^}]*)\}[^;]*from\s+["']react["']/m;
-const match = s.match(reactImport);
-if (match && !match[1].includes("useState")) {
-  s = s.replace(
-    reactImport,
-    (full, inside) => full.replace(inside, inside + ", useState")
-  );
-}
+      - name: Build web app
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: npm run build
 
-// Inject state block once
-if (!s.includes("__ENGINEER_NAME_FIELD__")) {
-  const block = `
-  /* __ENGINEER_NAME_FIELD__ */
-  const [engineerName, setEngineerName] = useState("");
-  const engineerSlug = (engineerName || "engineer")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  const fileName = \`timesheet-\${engineerSlug}-\${new Date().toISOString().slice(0,10)}.csv\`;
-`;
+      - name: Build Android APK
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
+          npx cap add android || true
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-  s = s.replace(
-    /(export\s+default\s+function\s+Home\s*\([^)]*\)\s*\{)/,
-    `$1${block}`
-  );
-}
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: ${{ steps.findroot.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
 
-// Inject UI once
-if (!s.includes("__ENGINEER_NAME_INPUT__")) {
-  const ui = `
-        {/* __ENGINEER_NAME_INPUT__ */}
-        <div className="w-full max-w-3xl mx-auto px-4 mt-2">
-          <label className="block text-sm font-medium mb-1">Engineer Name</label>
-          <input
-            value={engineerName}
-            onChange={(e)=>setEngineerName(e.target.value)}
-            placeholder="Type your name"
-            className="w-full rounded-md border px-3 py-2 text-base"
-          />
-        </div>
-`;
+Paste this fresh.
+Commit.
 
-  if (s.includes("</h1>")) {
-    s = s.replace("</h1>", "</h1>" + ui);
-  }
-}
-
-// Replace literal csv path with fileName
-s = s.replace(
-  /(Filesystem\.writeFile\s*\(\s*\{[\s\S]*?\bpath\s*:\s*)(["'][^"']+\.csv["'])/m,
-  `$1fileName`
-);
-
-fs.writeFileSync(file, s, "utf8");
-console.log("Engineer name patch applied successfully.");
-JS
-
-          node engineer_name_patch.cjs
+That will fix it.
