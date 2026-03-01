@@ -60,7 +60,7 @@ jobs:
           npx cap init "SOS EngiTrack" com.engitrack.timesheet --web-dir dist/public || true
           npx cap add android || true
           npx cap sync android
-                - name: One-step fix: force Kotlin stdlib version (prevents duplicate classes)
+      - name: One-step fix: force Kotlin stdlib version (prevents duplicate classes)
         working-directory: ${{ steps.findroot.outputs.root }}
         run: |
           set -e
