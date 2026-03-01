@@ -11,7 +11,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install unzip + patch
+      - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y unzip patch
 
       - name: Unzip project
@@ -30,6 +30,7 @@ jobs:
             exit 1
           fi
           echo "root=$ROOT" >> $GITHUB_OUTPUT
+          echo "Detected root: $ROOT"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -46,9 +47,81 @@ jobs:
         working-directory: ${{ steps.findroot.outputs.root }}
         run: npm install
 
-      - name: Install Capacitor CLI
+      - name: Install Capacitor deps
         working-directory: ${{ steps.findroot.outputs.root }}
-        run: npm install -D @capacitor/cli @capacitor/core @capacitor/android
+        run: |
+          npm install -D @capacitor/cli @capacitor/core @capacitor/android
+          npm install @capacitor/filesystem @capacitor/share @capacitor/clipboard
+
+      - name: Apply app patches (CSV + UI + engineer name)
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          set -e
+
+          apply_patch () {
+            local p="$1"
+            if [ ! -f "${GITHUB_WORKSPACE}/${p}" ]; then
+              echo "ERROR: Patch not found in repo root: ${p}"
+              exit 1
+            fi
+
+            echo "Applying patch: ${p}"
+            # --forward skips if already applied; --batch prevents interactive prompts
+            if ! patch --batch --forward -p1 < "${GITHUB_WORKSPACE}/${p}"; then
+              echo "ERROR: Patch failed: ${p}"
+              echo "---- If a .rej file was created, printing it ----"
+              find . -name "*.rej" -maxdepth 6 -print -exec sed -n '1,200p' {} \; || true
+              exit 1
+            fi
+          }
+
+          # 1) Known-working base: native CSV export + day off logic + remove settings
+          apply_patch "engitrack-fix-csv-dayoff-nosettings.patch"
+
+          # 2) Remove email bar (UI only)
+          apply_patch "engitrack-remove-email-ui-safe.patch"
+
+          # 3) Hide unpaid break UI (UI only)  ✅ you explicitly want this removed
+          apply_patch "engitrack-hide-unpaid-break-ui.patch"
+
+          # 4) Add engineer name + include in CSV filename  ✅ you explicitly want this
+          apply_patch "engitrack-add-engineer-name-filename.patch"
+
+      - name: Copy watermark image into app public folder
+        run: |
+          set -e
+          test -f "${{ github.workspace }}/sos-watermark.png"
+          mkdir -p "${{ steps.findroot.outputs.root }}/client/public"
+          cp "${{ github.workspace }}/sos-watermark.png" "${{ steps.findroot.outputs.root }}/client/public/sos-watermark.png"
+
+      - name: Add watermark CSS (safe, idempotent)
+        run: |
+          set -e
+          CSS_FILE="${{ steps.findroot.outputs.root }}/client/src/index.css"
+          test -f "$CSS_FILE"
+
+          if grep -q "SOS_WATERMARK_BG" "$CSS_FILE"; then
+            echo "Watermark CSS already present; skipping"
+            exit 0
+          fi
+
+          printf '\n/* SOS_WATERMARK_BG */\nbody::before {\n  content: "";\n  position: fixed;\n  top: 0;\n  left: 0;\n  width: 100%%;\n  height: 100%%;\n  background-image: url("/sos-watermark.png");\n  background-repeat: no-repeat;\n  background-position: 50%% 110px;\n  background-size: 300px;\n  opacity: 0.06;\n  pointer-events: none;\n  z-index: 0;\n}\n' >> "$CSS_FILE"
+
+      - name: VERIFY required changes exist (fail fast if missing)
+        working-directory: ${{ steps.findroot.outputs.root }}
+        run: |
+          set -e
+          echo "Checking CSV native export exists..."
+          grep -n "Filesystem\.writeFile" client/src/pages/Home.tsx
+          grep -n "@capacitor/filesystem" client/src/pages/Home.tsx
+          grep -n "@capacitor/share" client/src/pages/Home.tsx
+
+          echo "Checking Engineer Name field exists..."
+          grep -n "Engineer Name" client/src/pages/Home.tsx || true
+          grep -n "engineerName" client/src/pages/Home.tsx
+
+          echo "Checking email bar removed..."
+          ! grep -n "Dedicated Email" client/src/pages/Home.tsx
 
       - name: Build web app
         working-directory: ${{ steps.findroot.outputs.root }}
@@ -83,7 +156,7 @@ jobs:
           if [ -f "$STRINGS_FILE" ]; then
             sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">SOS EngiTrack<\/string>/' "$STRINGS_FILE"
           else
-            echo "WARNING: $STRINGS_FILE not found (skipping label change)"
+            echo "WARNING: strings.xml not found at $STRINGS_FILE (skipping label change)"
           fi
 
       - name: Assemble Debug APK
@@ -92,7 +165,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
